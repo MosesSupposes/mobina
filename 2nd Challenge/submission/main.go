@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,17 +19,40 @@ type Output struct {
 }
 
 func main() {
-	// Read input
-	var input Input
-	decoder := json.NewDecoder(os.Stdin)
-	err := decoder.Decode(&input)
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("Enter the path to your json file: ")
+	scanner.Scan()
+	filePath := scanner.Text()
+	output, err := transformToJSON(filePath)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	// Write output
+	encoder := json.NewEncoder(os.Stdout)
+	err = encoder.Encode(output.Data)
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+func transformToJSON(filepath string) (Output, error) {
+	// Read input from file
+	file, err := os.ReadFile(filepath)
+
+	if err != nil {
+		return Output{}, err
+	}
+
+	var input map[string]interface{}
+	err = json.Unmarshal(file, &input)
+	if err != nil {
+		return Output{}, err
+	}
+
 	// Transform
 	output := Output{Data: make(map[string]interface{})}
-	for key, value := range input.Data {
+	for key, value := range input {
 		key = strings.TrimSpace(key)
 
 		// Omit fields with empty keys
@@ -40,7 +64,7 @@ func main() {
 			for dataType, dataValue := range valueMap {
 				// Use type assertion to access underlying data
 				if dataValueStr, ok := dataValue.(string); ok {
-					// Sanatize inputs before processing
+					// Sanitize inputs before processing
 					dataValueStr = strings.TrimSpace(dataValueStr)
 
 					// Omit fields with empty values
@@ -78,14 +102,14 @@ func main() {
 						}
 					// List
 					case "L":
-						if transformedJsonData, hasValidStructure := handleCompositeValue(dataType, dataValueStr); hasValidStructure {
+						if transformedJsonData, hasValidStructure, _ := handleCompositeValue(dataType, dataValueStr); hasValidStructure {
 							output.Data[key] = transformedJsonData
 						} else {
 							continue
 						}
 					// Map
 					case "M":
-						if transformedJsonData, hasValidStructure := handleCompositeValue(dataType, dataValueStr); hasValidStructure {
+						if transformedJsonData, hasValidStructure, _ := handleCompositeValue(dataType, dataValueStr); hasValidStructure {
 							output.Data[key] = transformedJsonData
 						} else {
 							continue
@@ -93,15 +117,10 @@ func main() {
 					}
 				}
 			}
-			// Write output
-			encoder := json.NewEncoder(os.Stdout)
-			err = encoder.Encode(output.Data)
-			if err != nil {
-				fmt.Println(err)
-			}
 		}
-
 	}
+
+	return output, nil
 }
 
 func handlePrimitiveValue(dataType string, dataValue string) (interface{}, bool) {
@@ -140,47 +159,42 @@ func handlePrimitiveValue(dataType string, dataValue string) (interface{}, bool)
 }
 
 // Recursive function to handle complex data types
-func handleCompositeValue(dataType string, dataValue interface{}) (interface{}, bool) {
+func handleCompositeValue(dataType string, dataValue interface{}) (interface{}, bool, error) {
 	switch dataType {
 	case "L":
-		list := dataValue.([]interface{})
-		newList := make([]interface{}, 0, len(list))
-		for _, item := range list {
-			if itemMap, ok := item.(map[string]interface{}); ok {
-				for k, v := range itemMap {
-					if k != "NULL" && k != "L" && k != "M" {
-						if dataValueStr, ok := v.(string); ok {
-							compositePart, _ := handlePrimitiveValue(k, dataValueStr)
-							newList = append(newList, compositePart)
+		if list, ok := dataValue.([]interface{}); ok {
+			newList := make([]interface{}, 0, len(list))
+			for _, item := range list {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					for itemDataType, itemDataValue := range itemMap {
+						if itemDataValueStr, ok := itemDataValue.(string); ok {
+							if transformedJsonData, hasValidStructure := handlePrimitiveValue(itemDataType, itemDataValueStr); hasValidStructure {
+								newList = append(newList, transformedJsonData)
+							}
 						}
 					}
 				}
 			}
-		}
-		if len(newList) == 0 {
-			return nil, false
-		} else {
-			return newList, true
+			return newList, true, nil
 		}
 	case "M":
-		m := dataValue.(map[string]interface{})
-		newMap := make(map[string]interface{})
-		for k, v := range m {
-			if vMap, ok := v.(map[string]interface{}); ok {
-				for k2, v2 := range vMap {
-					if dataValueStr, ok := v2.(string); ok {
-						compositePart, _ := handlePrimitiveValue(k2, dataValueStr)
-						newMap[k] = compositePart
+		if mapValue, ok := dataValue.(map[string]interface{}); ok {
+			newMap := make(map[string]interface{})
+			for mapKey, mapItem := range mapValue {
+				if mapItemMap, ok := mapItem.(map[string]interface{}); ok {
+					for itemDataType, itemDataValue := range mapItemMap {
+						if itemDataValueStr, ok := itemDataValue.(string); ok {
+							if transformedJsonData, hasValidStructure := handlePrimitiveValue(itemDataType, itemDataValueStr); hasValidStructure {
+								newMap[mapKey] = transformedJsonData
+							}
+						}
 					}
 				}
 			}
-		}
-		if len(newMap) == 0 {
-			return nil, false
-		} else {
-			return newMap, true
+			return newMap, true, nil
 		}
 	default:
-		return nil, false
+		return nil, false, fmt.Errorf("unsupported data type: %s", dataType)
 	}
+	return nil, false, nil
 }
