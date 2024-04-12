@@ -19,6 +19,8 @@ type Output struct {
 }
 
 func main() {
+	start := time.Now()
+
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print("Enter the path to your json file: ")
 	scanner.Scan()
@@ -35,6 +37,9 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	elapsed := time.Since(start)
+	fmt.Printf("\n\nThe application took %s to run.\n", elapsed)
 }
 func transformToJSON(filepath string) (Output, error) {
 	// Read input from file
